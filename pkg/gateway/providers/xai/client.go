@@ -67,6 +67,7 @@ func (c *Client) NewResponses(ctx context.Context, inp *responses2.Request) (*re
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.opts.ApiKey)
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	res, err := c.opts.transport.Do(req)
 	if err != nil {
@@ -108,6 +109,7 @@ func (c *Client) NewStreamingResponses(ctx context.Context, inp *responses2.Requ
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.opts.ApiKey)
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	res, err := c.opts.transport.Do(req)
 	if err != nil {

@@ -31,6 +31,8 @@ type Parameters struct {
 
 	MaxToolCalls      *int  `json:"max_tool_calls,omitempty"`
 	ParallelToolCalls *bool `json:"parallel_tool_calls,omitempty"`
+
+	ExtraFields map[string]any `json:"extra_fields,omitempty"`
 }
 
 type TextFormat struct {

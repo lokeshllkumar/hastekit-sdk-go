@@ -2,6 +2,7 @@ package base
 
 import (
 	"context"
+	"net/http"
 
 	chat_completion2 "github.com/hastekit/hastekit-sdk-go/pkg/gateway/llm/chat_completion"
 	embeddings2 "github.com/hastekit/hastekit-sdk-go/pkg/gateway/llm/embeddings"
@@ -52,4 +53,16 @@ func (bp *BaseProvider) NewImageGeneration(ctx context.Context, in *image_genera
 
 func (bp *BaseProvider) NewImageEdit(ctx context.Context, in *image_edit2.Request) (*image_edit2.Response, error) {
 	return nil, nil
+}
+
+func AddAdditionalHeaders(req *http.Request, extraFields map[string]any) {
+	if extraFields != nil {
+		if additionalHeaders, ok := extraFields["additional_headers"]; ok {
+			for k, v := range additionalHeaders.(map[string]any) {
+				if vv, ok := v.(string); ok {
+					req.Header.Set(k, vv)
+				}
+			}
+		}
+	}
 }

@@ -76,6 +76,7 @@ func (c *Client) NewResponses(ctx context.Context, inp *responses2.Request) (*re
 	for k, v := range c.opts.Headers {
 		req.Header.Set(k, v)
 	}
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	res, err := c.opts.transport.Do(req)
 	if err != nil {
@@ -127,6 +128,7 @@ func (c *Client) NewStreamingResponses(ctx context.Context, inp *responses2.Requ
 	for k, v := range c.opts.Headers {
 		req.Header.Set(k, v)
 	}
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	res, err := c.opts.transport.Do(req)
 	if err != nil {

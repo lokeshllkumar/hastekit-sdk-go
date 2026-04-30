@@ -73,6 +73,7 @@ func (c *Client) NewResponses(ctx context.Context, inp *responses2.Request) (*re
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.opts.ApiKey)
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	// Apply custom headers (used for AWS auth headers like Authorization, x-amz-date, etc.)
 	for k, v := range c.opts.Headers {
@@ -116,6 +117,7 @@ func (c *Client) NewStreamingResponses(ctx context.Context, inp *responses2.Requ
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/vnd.amazon.eventstream")
 	req.Header.Set("Authorization", "Bearer "+c.opts.ApiKey)
+	base.AddAdditionalHeaders(req, inp.ExtraFields)
 
 	// Apply custom headers (used for AWS auth headers)
 	for k, v := range c.opts.Headers {

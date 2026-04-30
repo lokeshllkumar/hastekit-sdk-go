@@ -5,9 +5,13 @@ import (
 )
 
 func NativeRequestToRequest(in *responses2.Request) *Request {
-	return &Request{
+	req := &Request{
 		*in,
 	}
+
+	req.ExtraFields = nil
+
+	return req
 }
 
 func NativeResponseToResponse(in *responses2.Response) *Response {
