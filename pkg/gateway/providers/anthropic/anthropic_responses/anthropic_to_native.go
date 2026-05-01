@@ -31,6 +31,7 @@ func (in *Request) ToNativeRequest() *responses2.Request {
 			Metadata:        in.Metadata,
 			Stream:          in.Stream,
 			Include:         []responses2.Includable{},
+			ExtraFields:     in.ExtraFields.AsMap(),
 		},
 	}
 

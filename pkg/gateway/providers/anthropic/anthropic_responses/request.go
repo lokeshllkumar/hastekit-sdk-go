@@ -7,6 +7,7 @@ import (
 )
 
 type Request struct {
+	ExtraFields
 	MaxTokens int            `json:"max_tokens"`
 	Model     string         `json:"model"`
 	Messages  []MessageUnion `json:"messages"`
@@ -30,6 +31,30 @@ type OutputConfig struct {
 type ThinkingParam struct {
 	Type         *string `json:"type"` // "enabled" or "disabled" or "adaptive"
 	BudgetTokens *int    `json:"budget_tokens,omitempty"`
+}
+
+type ExtraFields struct {
+	CacheControl *CacheControlParams `json:"cache_control,omitempty"`
+}
+
+func (e *ExtraFields) AsMap() map[string]any {
+	buf, err := sonic.Marshal(e)
+	if err != nil {
+		return nil
+	}
+
+	m := map[string]any{}
+	err = sonic.Unmarshal(buf, &m)
+	if err != nil {
+		return nil
+	}
+
+	return m
+}
+
+type CacheControlParams struct {
+	Type string `json:"type"` // "ephemeral"
+	TTL  string `json:"ttl"`  // "1h"
 }
 
 type MessageUnion struct {

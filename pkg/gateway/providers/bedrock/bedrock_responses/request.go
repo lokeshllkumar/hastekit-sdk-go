@@ -36,7 +36,20 @@ type ToolConfig struct {
 }
 
 type Tool struct {
-	ToolSpec *ToolSpec `json:"toolSpec,omitempty"`
+	ToolSpec   *ToolSpec        `json:"toolSpec,omitempty"`
+	CachePoint *CachePointBlock `json:"cachePoint,omitempty"`
+}
+
+// CachePointBlock marks a Bedrock Converse cache breakpoint. The Bedrock
+// translator converts this into the underlying model's native caching
+// directive (e.g. Anthropic's cache_control).
+//
+// Type currently has only one valid value, "default". TTL is optional;
+// "5m" (default) and "1h" are accepted, but "1h" is supported only on a
+// subset of models (Claude Opus/Sonnet/Haiku 4.5).
+type CachePointBlock struct {
+	Type string `json:"type"`          // "default"
+	TTL  string `json:"ttl,omitempty"` // "5m" or "1h"
 }
 
 type ToolSpec struct {
@@ -62,6 +75,7 @@ type ContentBlock struct {
 	ToolUse          *ToolUseBlock     `json:"toolUse,omitempty"`
 	ToolResult       *ToolResultBlock  `json:"toolResult,omitempty"`
 	ReasoningContent *ReasoningContent `json:"reasoningContent,omitempty"`
+	CachePoint       *CachePointBlock  `json:"cachePoint,omitempty"`
 }
 
 // ReasoningContent represents a reasoning/thinking content block in the Converse API.
@@ -141,7 +155,64 @@ func NativeRequestToConverseRequest(in *responses.Request) *ConverseRequest {
 		out.ToolConfig = &ToolConfig{Tools: tools}
 	}
 
+	var cacheEnabled bool
+	var cacheTTL string
+	if in.ExtraFields != nil {
+		if v, ok := in.ExtraFields["cache_strategy"].(string); ok && v != "" {
+			cacheEnabled = true
+		}
+		if v, ok := in.ExtraFields["cache_ttl"].(string); ok {
+			cacheTTL = v
+		}
+
+		if out.AdditionalModelRequestFields == nil {
+			out.AdditionalModelRequestFields = map[string]any{}
+		}
+		for k, v := range in.ExtraFields {
+			// Meta-fields consumed by the SDK itself, not forwarded to Bedrock:
+			//   additional_headers — transport-level, applied by AddAdditionalHeaders
+			//   cache_strategy     — enables cachePoint injection below
+			//   cache_ttl          — sets ttl on injected cachePoints
+			if k == "additional_headers" || k == "cache_strategy" || k == "cache_ttl" {
+				continue
+			}
+			out.AdditionalModelRequestFields[k] = v
+		}
+	}
+
+	if cacheEnabled {
+		injectCachePoints(out, cacheTTL)
+	}
+
 	return out
+}
+
+// injectCachePoints adds Bedrock-native cachePoint blocks at the standard
+// breakpoints: the end of the last user message's content, and the end of the
+// tool list. Mirrors the Strands SDK default behavior for Anthropic models on
+// Bedrock — the Converse translator converts these into the model's native
+// caching directives.
+//
+// ttl is optional; pass "" to use Bedrock's default (5m), "5m", or "1h".
+func injectCachePoints(req *ConverseRequest, ttl string) {
+	point := func() *CachePointBlock {
+		return &CachePointBlock{Type: "default", TTL: ttl}
+	}
+
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			req.Messages[i].Content = append(req.Messages[i].Content, ContentBlock{
+				CachePoint: point(),
+			})
+			break
+		}
+	}
+
+	if req.ToolConfig != nil && len(req.ToolConfig.Tools) > 0 {
+		req.ToolConfig.Tools = append(req.ToolConfig.Tools, Tool{
+			CachePoint: point(),
+		})
+	}
 }
 
 func nativeToolsToConverseTools(nativeTools []responses.ToolUnion) []Tool {

@@ -363,6 +363,7 @@ func (c *ConverseStreamToNativeConverter) handleMetadata(meta *StreamMetadata) [
 			OutputTokens: meta.Usage.OutputTokens,
 			TotalTokens:  meta.Usage.TotalTokens,
 		}
+		c.usage.InputTokensDetails.CachedTokens = meta.Usage.CacheReadInputTokens
 	}
 
 	return c.buildResponseCompleted()

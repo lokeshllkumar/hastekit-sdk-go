@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/bytedance/sonic"
 	responses2 "github.com/hastekit/hastekit-sdk-go/pkg/gateway/llm/responses"
@@ -133,6 +134,21 @@ func (c *Client) NewStreamingResponses(ctx context.Context, inp *responses2.Requ
 		body, _ := io.ReadAll(res.Body)
 		res.Body.Close()
 		return nil, errors.New("bedrock converse-stream failed (" + res.Status + "): " + string(body))
+	}
+
+	// Bedrock signals some validation failures with HTTP 200 + JSON body instead
+	// of an event-stream. Detect via Content-Type. The header is sometimes
+	// empty/missing on success, so check positively for JSON rather than
+	// negatively for the event-stream type.
+	if ct := res.Header.Get("Content-Type"); strings.Contains(ct, "application/json") {
+		body, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		slog.WarnContext(ctx, "bedrock converse-stream rejected request",
+			slog.String("content_type", ct),
+			slog.String("response_body", string(body)),
+			slog.String("request_payload", string(payload)),
+		)
+		return nil, errors.New("bedrock converse-stream returned JSON error (content-type=" + ct + "): " + string(body))
 	}
 
 	out := make(chan *responses2.ResponseChunk)

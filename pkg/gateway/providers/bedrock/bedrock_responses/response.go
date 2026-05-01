@@ -19,9 +19,11 @@ type ConverseOutput struct {
 }
 
 type ConverseUsage struct {
-	InputTokens  int `json:"inputTokens"`
-	OutputTokens int `json:"outputTokens"`
-	TotalTokens  int `json:"totalTokens"`
+	InputTokens           int `json:"inputTokens"`
+	OutputTokens          int `json:"outputTokens"`
+	TotalTokens           int `json:"totalTokens"`
+	CacheReadInputTokens  int `json:"cacheReadInputTokens,omitempty"`
+	CacheWriteInputTokens int `json:"cacheWriteInputTokens,omitempty"`
 }
 
 type ConverseMetrics struct {
@@ -89,15 +91,18 @@ func (r *ConverseResponse) ToNativeResponse(model string) *responses.Response {
 		}
 	}
 
+	usage := &responses.Usage{
+		InputTokens:  r.Usage.InputTokens,
+		OutputTokens: r.Usage.OutputTokens,
+		TotalTokens:  r.Usage.TotalTokens,
+	}
+	usage.InputTokensDetails.CachedTokens = r.Usage.CacheReadInputTokens
+
 	return &responses.Response{
 		ID:     responses.NewOutputItemMessageID(),
 		Model:  model,
 		Output: output,
-		Usage: &responses.Usage{
-			InputTokens:  r.Usage.InputTokens,
-			OutputTokens: r.Usage.OutputTokens,
-			TotalTokens:  r.Usage.TotalTokens,
-		},
+		Usage:  usage,
 		Metadata: map[string]any{
 			"stop_reason": r.StopReason,
 		},

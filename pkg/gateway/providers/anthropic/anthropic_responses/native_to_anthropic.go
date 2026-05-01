@@ -97,6 +97,25 @@ func NativeRequestToRequest(in *responses2.Request) *Request {
 		delete(out.OutputFormat, "strict")
 	}
 
+	if in.ExtraFields != nil {
+		buf, err := sonic.Marshal(in.ExtraFields)
+		if err != nil {
+			slog.Error("error in marshaling extra fields")
+			return nil
+		}
+
+		var extraFields *ExtraFields
+		err = sonic.Unmarshal(buf, extraFields)
+		if err != nil {
+			slog.Error("error in unmarshaling extra fields")
+			return nil
+		}
+
+		if extraFields != nil {
+			out.ExtraFields = *extraFields
+		}
+	}
+
 	return out
 }
 
