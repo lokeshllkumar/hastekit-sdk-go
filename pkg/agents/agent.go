@@ -479,19 +479,11 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 
 			var executableToolCalls []ExecutableToolCall
 
-			toolResults := make([]*responses.FunctionCallOutputMessage, len(run.RunState.PendingToolCalls))
-			stateUpdates := make([]map[string]string, len(run.RunState.PendingToolCalls))
+			toolResults := make([]*ToolCallResponse, len(run.RunState.PendingToolCalls))
 
 			for i, toolCall := range run.RunState.PendingToolCalls {
 				if slices.Contains(rejectedToolCallIds, toolCall.CallID) {
-					// Tool was rejected by human
-					toolResults[i] = &responses.FunctionCallOutputMessage{
-						ID:     toolCall.ID,
-						CallID: toolCall.CallID,
-						Output: responses.FunctionCallOutputContentUnion{
-							OfString: utils.Ptr("Request to call this tool has been declined"),
-						},
-					}
+					toolResults[i] = toolResponse(toolCall, "User has declined the request to call this tool")
 				} else if toolCall.Name == "transfer_to_agent" {
 					var param map[string]any
 					if err := sonic.Unmarshal([]byte(toolCall.Arguments), &param); err != nil {
@@ -500,13 +492,7 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 
 					for _, handoff := range e.handoffs {
 						if handoff.Name == param["agent_name"] {
-							toolResults[i] = &responses.FunctionCallOutputMessage{
-								ID:     toolCall.ID,
-								CallID: toolCall.CallID,
-								Output: responses.FunctionCallOutputContentUnion{
-									OfString: utils.Ptr("Transferred to agent"),
-								},
-							}
+							toolResults[i] = toolResponse(toolCall, "Transferred to agent")
 
 							handoffFn = func() (*AgentOutput, error) {
 								return handoff.Agent.ExecuteWithRun(ctx, in, run)
@@ -516,26 +502,14 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 					}
 
 					if toolResults[i] == nil {
-						toolResults[i] = &responses.FunctionCallOutputMessage{
-							ID:     toolCall.ID,
-							CallID: toolCall.CallID,
-							Output: responses.FunctionCallOutputContentUnion{
-								OfString: utils.Ptr("Failed to transfer to agent. Target agent not found."),
-							},
-						}
+						toolResults[i] = toolResponse(toolCall, "Failed to transfer to agent. Target agent not found")
 					}
 				} else {
 					// Regular tool — queue for parallel execution
 					tool := findTool(ctx, tools, toolCall.Name)
 					if tool == nil {
 						slog.ErrorContext(ctx, "tool not found", slog.String("tool_name", toolCall.Name))
-						toolResults[i] = &responses.FunctionCallOutputMessage{
-							ID:     toolCall.ID,
-							CallID: toolCall.CallID,
-							Output: responses.FunctionCallOutputContentUnion{
-								OfString: utils.Ptr("Tool not found: " + toolCall.Name),
-							},
-						}
+						toolResults[i] = toolResponse(toolCall, "Tool not found: "+toolCall.Name)
 						continue
 					}
 					executableToolCalls = append(executableToolCalls, ExecutableToolCall{
@@ -567,38 +541,31 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 						}
 						// Tool error — report to LLM as error result
 						slog.ErrorContext(ctx, "tool execution failed", slog.String("tool_name", pe.ToolCall.Name), slog.Any("error", result.Err))
-						toolResults[pe.Index] = &responses.FunctionCallOutputMessage{
-							ID:     pe.ToolCall.ID,
-							CallID: pe.ToolCall.CallID,
-							Output: responses.FunctionCallOutputContentUnion{
-								OfString: utils.Ptr(fmt.Sprintf("Tool execution failed: %v", result.Err)),
-							},
-						}
+						toolResults[pe.Index] = toolResponse(*pe.ToolCall.FunctionCallMessage, fmt.Sprintf("Tool execution failed: %v", result.Err))
 					} else {
-						toolResults[pe.Index] = result.Response.FunctionCallOutputMessage
-						stateUpdates[pe.Index] = result.Response.StateUpdates
+						toolResults[pe.Index] = result.Response
 					}
 				}
 			}
 
 			// Process all results in original order
-			for i, toolResult := range toolResults {
+			for _, toolResult := range toolResults {
 				if toolResult == nil {
 					continue
 				}
 
 				// Merge sub-agent context if present
-				if stateUpdates[i] != nil {
-					maps.Copy(run.State, stateUpdates[i])
+				if toolResult.StateUpdates != nil {
+					maps.Copy(run.State, toolResult.StateUpdates)
 				}
 
 				// TODO: Make this a durable step to avoid resending
 				publish(&responses.ResponseChunk{
-					OfFunctionCallOutput: toolResult,
+					OfFunctionCallOutput: toolResult.FunctionCallOutputMessage,
 				})
 
 				toolResultMsg := []responses.InputMessageUnion{
-					{OfFunctionCallOutput: toolResult},
+					{OfFunctionCallOutput: toolResult.FunctionCallOutputMessage},
 				}
 
 				// Add tool result to history
@@ -789,4 +756,16 @@ func (h *AgentHandle) Result() (*AgentOutput, error) {
 	for range h.Chunks {
 	}
 	return h.Wait()
+}
+
+func toolResponse(toolCall responses.FunctionCallMessage, textOutput string) *ToolCallResponse {
+	return &ToolCallResponse{
+		FunctionCallOutputMessage: &responses.FunctionCallOutputMessage{
+			ID:     toolCall.ID,
+			CallID: toolCall.CallID,
+			Output: responses.FunctionCallOutputContentUnion{
+				OfString: utils.Ptr(textOutput),
+			},
+		},
+	}
 }
