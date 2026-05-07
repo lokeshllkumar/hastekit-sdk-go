@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"github.com/hastekit/hastekit-sdk-go/pkg/agents"
 	"github.com/hastekit/hastekit-sdk-go/pkg/gateway/llm/constants"
@@ -24,10 +25,53 @@ type AgentTool struct {
 	contextMode SubAgentContextMode
 }
 
-func NewAgentTool(t *responses.ToolUnion, agent *agents.Agent, contextMode SubAgentContextMode) *AgentTool {
+type agentToolArgument struct {
+	Message  string `json:"message"`
+	ThreadID string `json:"thread_id"`
+}
+
+func NewAgentTool(name string, description string, agent *agents.Agent, contextMode SubAgentContextMode) *AgentTool {
+	toolUnion := responses.ToolUnion{
+		OfFunction: &responses.FunctionTool{
+			Name:        name,
+			Description: utils.Ptr(description),
+		},
+	}
+
+	switch contextMode {
+	case SubAgentContextModeNone:
+		toolUnion.OfFunction.Parameters = map[string]any{
+			"type":     "object",
+			"required": []string{"message"},
+			"properties": map[string]any{
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Message for the agent",
+				},
+				"thread_id": map[string]any{
+					"type":        "string",
+					"description": "Thread ID for the agent conversation. Leave empty to start a new conversation.",
+				},
+			},
+			"additionalProperties": false,
+		}
+	case SubAgentContextModeIsolated:
+		toolUnion.OfFunction.Parameters = map[string]any{
+			"type":     "object",
+			"required": []string{"message"},
+			"properties": map[string]any{
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Message for the agent",
+				},
+			},
+			"additionalProperties": false,
+		}
+	}
+
 	return &AgentTool{
 		BaseTool: &agents.BaseTool{
-			ToolUnion: *t,
+			ToolUnion: toolUnion,
 		},
 		agent:       agent,
 		contextMode: contextMode,
@@ -37,11 +81,24 @@ func NewAgentTool(t *responses.ToolUnion, agent *agents.Agent, contextMode SubAg
 func (t *AgentTool) Execute(ctx context.Context, params *agents.ToolCall) (*agents.ToolCallResponse, error) {
 	namespace := params.Namespace + "/" + params.Name
 
-	threadId := uuid.NewString()
+	var agentArgs agentToolArgument
+	if err := sonic.Unmarshal([]byte(params.Arguments), &agentArgs); err != nil {
+		return nil, err
+	}
+
+	var threadId string
 	if t.contextMode == SubAgentContextModeIsolated {
 		subAgentThreadId, exists := params.State[t.getSubAgentThreadIdStateKey()]
 		if exists {
 			threadId = subAgentThreadId
+		} else {
+			threadId = uuid.NewString()
+		}
+	} else {
+		if agentArgs.ThreadID != "" {
+			threadId = agentArgs.ThreadID
+		} else {
+			threadId = uuid.NewString()
 		}
 	}
 
@@ -52,7 +109,7 @@ func (t *AgentTool) Execute(ctx context.Context, params *agents.ToolCall) (*agen
 			{
 				OfEasyInput: &responses.EasyMessage{
 					Role:    constants.RoleUser,
-					Content: responses.EasyInputContentUnion{OfString: &params.Arguments},
+					Content: responses.EasyInputContentUnion{OfString: &agentArgs.Message},
 				},
 			},
 		},
@@ -92,6 +149,10 @@ func (t *AgentTool) Execute(ctx context.Context, params *agents.ToolCall) (*agen
 				}
 			}
 		}
+	}
+
+	if t.contextMode == SubAgentContextModeNone {
+		data = data + fmt.Sprintf("\n---\nThread ID: %s", threadId)
 	}
 
 	return &agents.ToolCallResponse{
