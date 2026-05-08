@@ -333,14 +333,6 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 	// Load run state from meta (in-memory, no DB call)
 	runId := run.GetMessageID()
 
-	// Collect tool rejections
-	var rejectedToolCallIds []string
-	if run.RunState.IsPaused() {
-		if run.RunState.CurrentStep == agentstate.StepAwaitApproval {
-			rejectedToolCallIds = in.Messages[0].OfFunctionCallApprovalResponse.RejectedCallIds
-		}
-	}
-
 	// Get the prompt
 	instruction := "You are a helpful assistant."
 	if e.instruction != nil {
@@ -392,6 +384,12 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 				finalOutput = append(finalOutput, cancelMsg)
 				run.RunState.TransitionToComplete()
 			}
+		}
+
+		// Drain queued input messages from the broker.
+		if in.StreamID != "" && e.streamBroker != nil && !run.RunState.IsComplete() {
+			queued, _ := e.streamBroker.DrainMessages(context.Background(), in.StreamID)
+			run.ProcessIncomingMessages(queued)
 		}
 
 		switch run.RunState.NextStep() {
@@ -462,6 +460,9 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 
 				// Execute immediate tools first (if any), then handle approval
 				if len(immediate) > 0 {
+					for _, tc := range immediate {
+						run.RunState.QueuedApprovals = append(run.RunState.QueuedApprovals, tc.CallID)
+					}
 					run.RunState.TransitionToExecuteTools(immediate)
 					// Store tools needing approval for after immediate execution
 					if len(needsApproval) > 0 {
@@ -482,9 +483,17 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 			toolResults := make([]*ToolCallResponse, len(run.RunState.PendingToolCalls))
 
 			for i, toolCall := range run.RunState.PendingToolCalls {
-				if slices.Contains(rejectedToolCallIds, toolCall.CallID) {
+				if rejected := slices.Contains(run.RunState.QueuedRejections, toolCall.CallID); rejected {
 					toolResults[i] = toolResponse(toolCall, "User has declined the request to call this tool")
-				} else if toolCall.Name == "transfer_to_agent" {
+					continue
+				}
+
+				if approved := slices.Contains(run.RunState.QueuedApprovals, toolCall.CallID); !approved {
+					run.RunState.ToolsAwaitingApproval = append(run.RunState.ToolsAwaitingApproval, toolCall)
+					continue
+				}
+
+				if toolCall.Name == "transfer_to_agent" {
 					var param map[string]any
 					if err := sonic.Unmarshal([]byte(toolCall.Arguments), &param); err != nil {
 						return &AgentOutput{Status: agentstate.RunStatusError, RunID: runId}, err

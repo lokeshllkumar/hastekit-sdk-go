@@ -134,6 +134,12 @@ func (b *RedisStreamBroker) stopKey(channel string) string {
 	return b.prefix + "stop:" + channel
 }
 
+// queueKey returns the Redis list key holding queued input messages
+// for a channel.
+func (b *RedisStreamBroker) queueKey(channel string) string {
+	return b.prefix + "queue:" + channel
+}
+
 // Publish appends a chunk to the channel's Redis Stream. The stream
 // key has its active TTL refreshed on first write so a long-lived
 // stream doesn't silently expire.
@@ -293,6 +299,81 @@ func (b *RedisStreamBroker) IsStopped(ctx context.Context, channel string) (bool
 		return false, fmt.Errorf("failed to read stop flag: %w", err)
 	}
 	return n > 0, nil
+}
+
+// EnqueueMessage appends a JSON-encoded message to the channel's queue
+// list. The list TTL is refreshed on each push.
+func (b *RedisStreamBroker) EnqueueMessage(ctx context.Context, channel string, msg responses.InputMessageUnion) error {
+	data, err := sonic.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to serialize message: %w", err)
+	}
+	key := b.queueKey(channel)
+	pipe := b.client.TxPipeline()
+	pipe.RPush(ctx, key, data)
+	pipe.Expire(ctx, key, b.activeTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("failed to enqueue message: %w", err)
+	}
+	return nil
+}
+
+// DrainMessages atomically returns and clears all queued messages.
+// LRANGE+DEL inside MULTI/EXEC ensures concurrent drains never see
+// partial state.
+func (b *RedisStreamBroker) DrainMessages(ctx context.Context, channel string) ([]responses.InputMessageUnion, error) {
+	key := b.queueKey(channel)
+	pipe := b.client.TxPipeline()
+	rangeCmd := pipe.LRange(ctx, key, 0, -1)
+	pipe.Del(ctx, key)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, fmt.Errorf("failed to drain messages: %w", err)
+	}
+
+	raw, err := rangeCmd.Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read drained messages: %w", err)
+	}
+
+	out := make([]responses.InputMessageUnion, 0, len(raw))
+	for _, s := range raw {
+		var msg responses.InputMessageUnion
+		if err := sonic.Unmarshal([]byte(s), &msg); err != nil {
+			// Skip malformed entries rather than failing the whole drain.
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out, nil
+}
+
+// IsActive reports whether the channel has an in-flight run. The
+// stream key existing isn't sufficient — Close shrinks its TTL but
+// the key lingers in the replay window. We additionally check whether
+// the stream-end sentinel has been written.
+func (b *RedisStreamBroker) IsActive(ctx context.Context, channel string) (bool, error) {
+	key := b.streamKey(channel)
+	n, err := b.client.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to check stream existence: %w", err)
+	}
+	if n == 0 {
+		return false, nil
+	}
+
+	// Latest entry — if it's the stream-end sentinel, the run terminated.
+	entries, err := b.client.XRevRangeN(ctx, key, "+", "-", 1).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to read latest entry: %w", err)
+	}
+	if len(entries) == 0 {
+		// Key exists but no entries — treat as not active.
+		return false, nil
+	}
+	if t, _ := entries[0].Values["type"].(string); t == streamEndType {
+		return false, nil
+	}
+	return true, nil
 }
 
 // GetClient returns the underlying Redis client.

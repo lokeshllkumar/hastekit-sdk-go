@@ -2,7 +2,6 @@ package history
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 
@@ -117,20 +116,11 @@ func NewRun(ctx context.Context, cm *CommonConversationManager, namespace string
 		// Create a new run id
 		runID = cr.ConversationPersistenceAdapter.NewRunID(ctx)
 		cr.RunState = agentstate.NewRunState()
-		cr.AddMessages(ctx, messages, nil)
+		cr.ProcessIncomingMessages(messages)
 	} else {
 		// Continuing the previous run
 		runID = cr.previousMsgId
-
-		if cr.RunState.CurrentStep == agentstate.StepAwaitApproval {
-			// Expect approval
-			if len(messages) == 0 || messages[0].OfFunctionCallApprovalResponse == nil {
-				return nil, errors.New("expected approval response message to resume the run")
-			}
-
-			// Transition to tool execution, as we have approval message
-			cr.RunState.CurrentStep = agentstate.StepExecuteTools
-		}
+		cr.ProcessIncomingMessages(messages)
 	}
 
 	// Store the run id
@@ -182,6 +172,10 @@ func (cm *ConversationRunManager) GetMessages(ctx context.Context) ([]responses.
 			}
 		}
 	}
+
+	// Add queued messages to the new messages
+	cm.newMessages = append(cm.newMessages, cm.RunState.QueuedMessages...)
+	cm.RunState.QueuedMessages = []responses.InputMessageUnion{}
 
 	return append(cm.oldMessages, cm.newMessages...), nil
 }
@@ -332,5 +326,28 @@ func (cm *ConversationRunManager) loadSubAgentContext(ctx context.Context) {
 	if err = sonic.Unmarshal(buf, &cm.State); err != nil {
 		slog.ErrorContext(ctx, "failed to unmarshal state", "error", err)
 		return
+	}
+}
+
+func (cm *ConversationRunManager) ProcessIncomingMessages(messages []responses.InputMessageUnion) {
+	// Process incoming message, and extract tool approvals and user messages
+	hasNewApproval := false
+	for _, msg := range messages {
+		if msg.OfFunctionCallApprovalResponse != nil {
+			hasNewApproval = true
+			r := msg.OfFunctionCallApprovalResponse
+			cm.RunState.QueuedApprovals = append(cm.RunState.QueuedApprovals, r.ApprovedCallIds...)
+			cm.RunState.QueuedRejections = append(cm.RunState.QueuedRejections, r.RejectedCallIds...)
+		} else {
+			cm.RunState.QueuedMessages = append(cm.RunState.QueuedMessages, msg)
+		}
+	}
+
+	// If we are waiting for approval, and got an new approval message, move to execute tools
+	//  - If new approval is not received, let the user messages be in the queue
+	if cm.RunState.CurrentStep == agentstate.StepAwaitApproval {
+		if hasNewApproval {
+			cm.RunState.CurrentStep = agentstate.StepExecuteTools
+		}
 	}
 }

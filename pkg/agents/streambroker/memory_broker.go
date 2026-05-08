@@ -18,6 +18,7 @@ type MemoryStreamBroker struct {
 	subscribers map[string][]chan *responses.ResponseChunk
 	closed      map[string]bool
 	stopped     map[string]bool
+	queues      map[string][]responses.InputMessageUnion
 }
 
 // NewMemoryStreamBroker creates a new in-memory stream broker.
@@ -26,6 +27,7 @@ func NewMemoryStreamBroker() *MemoryStreamBroker {
 		subscribers: make(map[string][]chan *responses.ResponseChunk),
 		closed:      make(map[string]bool),
 		stopped:     make(map[string]bool),
+		queues:      make(map[string][]responses.InputMessageUnion),
 	}
 }
 
@@ -129,6 +131,37 @@ func (b *MemoryStreamBroker) IsStopped(ctx context.Context, channel string) (boo
 	return b.stopped[channel], nil
 }
 
+// EnqueueMessage appends a message onto the channel's pending queue.
+// The message remains available until DrainMessages is called.
+func (b *MemoryStreamBroker) EnqueueMessage(ctx context.Context, channel string, msg responses.InputMessageUnion) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.queues[channel] = append(b.queues[channel], msg)
+	return nil
+}
+
+// DrainMessages atomically returns and removes all queued messages
+// for the channel.
+func (b *MemoryStreamBroker) DrainMessages(ctx context.Context, channel string) ([]responses.InputMessageUnion, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	msgs := b.queues[channel]
+	delete(b.queues, channel)
+	return msgs, nil
+}
+
+// IsActive reports whether the channel has live subscribers and has
+// not been closed. Used by callers (e.g. an HTTP gateway) to decide
+// between enqueueing onto an existing run and starting a fresh one.
+func (b *MemoryStreamBroker) IsActive(ctx context.Context, channel string) (bool, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.closed[channel] {
+		return false, nil
+	}
+	return len(b.subscribers[channel]) > 0, nil
+}
+
 // Reset clears all subscribers and closed state.
 // Useful for testing.
 func (b *MemoryStreamBroker) Reset() {
@@ -145,4 +178,5 @@ func (b *MemoryStreamBroker) Reset() {
 	b.subscribers = make(map[string][]chan *responses.ResponseChunk)
 	b.closed = make(map[string]bool)
 	b.stopped = make(map[string]bool)
+	b.queues = make(map[string][]responses.InputMessageUnion)
 }

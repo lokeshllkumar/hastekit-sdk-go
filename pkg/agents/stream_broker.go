@@ -29,4 +29,21 @@ type StreamBroker interface {
 
 	// IsStopped reports whether Stop has been called for the channel.
 	IsStopped(ctx context.Context, channel string) (bool, error)
+
+	// EnqueueMessage pushes an input message onto the channel's queue.
+	// The agent loop drains this queue at iteration boundaries — same
+	// cadence as IsStopped — and folds queued messages into the current
+	// run. Generic so future callers can deliver user messages, tool
+	// outputs, etc., without a new transport.
+	EnqueueMessage(ctx context.Context, channel string, msg responses.InputMessageUnion) error
+
+	// DrainMessages atomically returns and clears all queued messages
+	// for the channel. Empty slice if nothing queued.
+	DrainMessages(ctx context.Context, channel string) ([]responses.InputMessageUnion, error)
+
+	// IsActive reports whether the channel has an in-flight run — used
+	// by the gateway to decide between enqueueing onto an existing
+	// stream and starting a fresh one. A channel is active once
+	// Subscribe has been called and stays active until Close.
+	IsActive(ctx context.Context, channel string) (bool, error)
 }

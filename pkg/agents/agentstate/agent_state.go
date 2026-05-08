@@ -32,6 +32,9 @@ type RunState struct {
 	Usage                 responses.Usage                 `json:"usage"`
 	PendingToolCalls      []responses.FunctionCallMessage `json:"pending_tool_calls,omitempty"`
 	ToolsAwaitingApproval []responses.FunctionCallMessage `json:"tools_awaiting_approval,omitempty"`
+	QueuedApprovals       []string                        `json:"queued_approvals,omitempty"`
+	QueuedRejections      []string                        `json:"queued_rejections,omitempty"`
+	QueuedMessages        []responses.InputMessageUnion   `json:"queued_messages,omitempty"`
 	TraceID               string                          `json:"traceid"`
 }
 
@@ -118,6 +121,18 @@ func (s *RunState) ToMeta() map[string]any {
 		runStateMap["tools_awaiting_approval"] = s.ToolsAwaitingApproval
 	}
 
+	if len(s.QueuedApprovals) > 0 {
+		runStateMap["queued_approvals"] = s.QueuedApprovals
+	}
+
+	if len(s.QueuedRejections) > 0 {
+		runStateMap["queued_rejections"] = s.QueuedRejections
+	}
+
+	if len(s.QueuedMessages) > 0 {
+		runStateMap["queued_messages"] = s.QueuedMessages
+	}
+
 	return map[string]any{
 		"run_state": runStateMap,
 	}
@@ -180,6 +195,27 @@ func LoadRunStateFromMeta(meta map[string]any) *RunState {
 		toolCallsBytes, err := sonic.Marshal(awaitingApproval)
 		if err == nil {
 			sonic.Unmarshal(toolCallsBytes, &state.ToolsAwaitingApproval)
+		}
+	}
+
+	if queuedApprovals, ok := runStateData["queued_approvals"]; ok {
+		queuedApprovalsBytes, err := sonic.Marshal(queuedApprovals)
+		if err == nil {
+			sonic.Unmarshal(queuedApprovalsBytes, &state.QueuedApprovals)
+		}
+	}
+
+	if queuedRejections, ok := runStateData["queued_rejections"]; ok {
+		queuedRejectionsBytes, err := sonic.Marshal(queuedRejections)
+		if err == nil {
+			sonic.Unmarshal(queuedRejectionsBytes, &state.QueuedRejections)
+		}
+	}
+
+	if queuedMessages, ok := runStateData["queued_messages"]; ok {
+		queuedMessagesBytes, err := sonic.Marshal(queuedMessages)
+		if err == nil {
+			sonic.Unmarshal(queuedMessagesBytes, &state.QueuedMessages)
 		}
 	}
 
