@@ -86,7 +86,7 @@ func (w *AgentWorkflow) newRestateAgentProxy(restateCtx restate.WorkflowContext,
 		Tools:        restateTools,
 		McpServers:   mcpClients,
 		ToolExecutor: NewRestateToolExecutor(restateCtx),
-		StreamBroker: w.broker,
+		StreamBroker: NewRestateStreamBroker(restateCtx, w.broker),
 	}
 
 	for _, h := range agentOptions.Handoffs {

@@ -37,6 +37,10 @@ func (a *TemporalAgentV2) GetActivities() map[string]interface{} {
 	activities[a.options.Name+"_SaveMessagesActivity"] = temporalConversationPersistence.SaveMessages
 	activities[a.options.Name+"_SaveSummaryActivity"] = temporalConversationPersistence.SaveSummary
 
+	temporalStreamBroker := NewTemporalStreamBroker(a.broker)
+	activities[a.options.Name+"_IsStoppedActivity"] = temporalStreamBroker.IsStopped
+	activities[a.options.Name+"_DrainMessagesActivity"] = temporalStreamBroker.DrainMessages
+
 	if a.options.History.Summarizer != nil {
 		temporalSummarizer := NewTemporalConversationSummarizer(a.options.History.Summarizer)
 		activities[a.options.Name+"_SummarizerActivity"] = temporalSummarizer
@@ -109,7 +113,7 @@ func (a *TemporalAgentV2) newTemporalProxyAgent(ctx workflow.Context) *agents.Ag
 		Tools:        toolProxies,
 		McpServers:   mcpProxies,
 		ToolExecutor: NewTemporalToolExecutor(ctx),
-		StreamBroker: a.broker,
+		StreamBroker: NewTemporalStreamBrokerProxy(ctx, a.options.Name, a.broker),
 	}
 
 	for _, h := range a.options.Handoffs {
