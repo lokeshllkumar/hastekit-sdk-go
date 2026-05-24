@@ -86,7 +86,7 @@ func (sp *SimplePrompt) GetPrompt(ctx context.Context, deps *agents.Dependencies
 
 	prompt += skillsToPrompts(sp.skills)
 	prompt += handoffsToPrompts(deps.Handoffs)
-	prompt += deferredToolsToPrompts(ctx, deps.DeferredTools)
+	prompt += deferredToolsToPrompts(deps.DeferredTools)
 
 	if deps.RunContext == nil {
 		return prompt, nil
@@ -160,18 +160,18 @@ func handoffsToPrompts(handoffs []*agents.Handoff) string {
 	return p.String()
 }
 
-func deferredToolsToPrompts(ctx context.Context, deferredTools []agents.Tool) string {
-	if deferredTools == nil || len(deferredTools) == 0 {
+func deferredToolsToPrompts(deferredTools []agents.DeferredToolInfo) string {
+	if len(deferredTools) == 0 {
 		return ""
 	}
 
 	var p strings.Builder
 
 	p.WriteString("\n\n" + "## Deferred Tools\n")
-	p.WriteString("Deferred tools are tools that are not available in the current context. Use the `execute_deferred_tool` tool to execute the deferred tool. \n")
+	p.WriteString("Deferred tools are tools that are not available in the current context. Use the `ToolSearch` tool to activate the deferred tool and get its full description and schema. \n")
 	p.WriteString("<available-deferred-tools>>")
 	for _, tool := range deferredTools {
-		p.WriteString(fmt.Sprintf("<deferred-tool><name>%s</name></deferred-tool>", tool.Tool(ctx).OfFunction.Name))
+		p.WriteString(fmt.Sprintf("<deferred-tool><name>%s</name><description>%s</description></deferred-tool>", tool.Name, tool.Description))
 	}
 	p.WriteString("</available-deferred-tools>")
 	p.WriteString("\n---\n")

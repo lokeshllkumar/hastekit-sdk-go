@@ -336,10 +336,28 @@ func (e *Agent) ExecuteWithRun(ctx context.Context, in *AgentInput, run *history
 	// Get the prompt
 	instruction := "You are a helpful assistant."
 	if e.instruction != nil {
+		// Project deferred tools into a JSON-serializable view so the
+		// Dependencies struct survives Temporal's activity boundary.
+		var deferredToolInfos []DeferredToolInfo
+		if len(deferredTools) > 0 {
+			deferredToolInfos = make([]DeferredToolInfo, 0, len(deferredTools))
+			for _, dt := range deferredTools {
+				schema := dt.Tool(ctx)
+				if schema == nil || schema.OfFunction == nil {
+					continue
+				}
+				info := DeferredToolInfo{Name: schema.OfFunction.Name}
+				if schema.OfFunction.Description != nil {
+					info.Description = *schema.OfFunction.Description
+				}
+				deferredToolInfos = append(deferredToolInfos, info)
+			}
+		}
+
 		instruction, err = e.instruction.GetPrompt(ctx, &Dependencies{
 			RunContext:    in.RunContext,
 			Handoffs:      e.handoffs,
-			DeferredTools: deferredTools,
+			DeferredTools: deferredToolInfos,
 		})
 		if err != nil {
 			return &AgentOutput{Status: agentstate.RunStatusError, RunID: runId}, err
