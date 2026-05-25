@@ -24,6 +24,15 @@ func AddContext(ctx context.Context, values map[string]string) context.Context {
 	return context.WithValue(ctx, gatewayContextKey{}, values)
 }
 
+func GetContext(ctx context.Context) map[string]string {
+	gatewayContextAny := ctx.Value(gatewayContextKey{})
+	gatewayContext, ok := gatewayContextAny.(map[string]string)
+	if ok {
+		return gatewayContext
+	}
+	return map[string]string{}
+}
+
 func addToSpan(ctx context.Context, span trace.Span) {
 	if span == nil {
 		return
