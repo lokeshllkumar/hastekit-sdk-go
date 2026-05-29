@@ -20,6 +20,8 @@ func (g *LLMGateway) handleResponsesRequest(ctx context.Context, providerName ll
 		attribute.String("llm.model", in.Model),
 		attribute.Bool("llm.streaming", false),
 		attribute.Int("llm.tools_count", len(in.Tools)),
+		attribute.String("gen_ai.provider.name", string(providerName)),
+		attribute.String("gen_ai.request.model", in.Model),
 	)
 
 	out, err := p.NewResponses(ctx, in)
@@ -49,6 +51,8 @@ func (g *LLMGateway) handleStreamingResponsesRequest(ctx context.Context, provid
 		attribute.String("llm.provider", string(providerName)),
 		attribute.String("llm.model", in.Model),
 		attribute.Int("tools_count", len(in.Tools)),
+		attribute.String("gen_ai.provider.name", string(providerName)),
+		attribute.String("gen_ai.request.model", in.Model),
 	)
 
 	if in.Instructions != nil {
